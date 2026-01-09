@@ -104,7 +104,7 @@
 
     <div class="input-box glass" id="inputContainer">
         <div class="input-wrap">
-            <input type="text" id="msgInput" placeholder="Write securely...">
+            <input type="text" id="msgInput" placeholder="Write securely..." onkeypress="if(event.key==='Enter') sendMsg()">
             <button class="icon-btn" onclick="document.getElementById('imgInp').click()"><i data-lucide="image"></i></button>
             <input type="file" id="imgInp" hidden accept="image/*" onchange="uploadImg(this)">
         </div>
@@ -114,8 +114,8 @@
 
 <div class="info-sidebar glass" id="rightSidebar">
     <div class="avatar-main" id="sidePfp"></div>
-    <h2 id="sideName" style="margin-bottom: 5px;">User</h2>
-    <code id="sideId" class="id-badge" style="filter:none; opacity:0.5; margin-bottom:20px;" onclick="copyText(this.innerText)"></code>
+    <h2 id="sideName">User</h2>
+    <code id="sideId" class="id-badge" style="filter:none; opacity:0.5; margin-bottom:20px;" onclick="copyText(this.innerText)">ID</code>
     <button class="btn" style="background:transparent; border:1px solid var(--border); color:#888;" onclick="toggleProfileSidebar()">Close Panel</button>
 </div>
 
@@ -141,8 +141,8 @@
 <div class="modal-overlay" id="mobileProfileModal" onclick="closeModals()">
     <div class="glass" style="padding: 40px 20px; border-radius: 30px 30px 0 0; position: fixed; bottom: 0; width: 100%; text-align: center;" onclick="event.stopPropagation()">
         <div class="avatar-main" id="mobPfp" style="margin: 0 auto 15px;"></div>
-        <h2 id="mobName"></h2>
-        <p id="mobId" class="id-badge" style="filter:none; opacity:0.5;" onclick="copyText(this.innerText)"></p>
+        <h2 id="mobName">User</h2>
+        <p id="mobId" class="id-badge" style="filter:none; opacity:0.5;" onclick="copyText(this.innerText)">ID</p>
         <button class="btn" style="margin-top: 20px; background: #111; color: #fff;" onclick="closeModals()">Dismiss</button>
     </div>
 </div>
@@ -170,7 +170,6 @@
         peer.on('connection', conn => setupConn(conn));
         setInterval(checkHealth, 1000);
         setInterval(cleanupMessages, 60000);
-
         updatePfpPreview('mySettingsPfp', db.me.pic);
     }
 
@@ -188,7 +187,7 @@
             if (data.type === 'heartbeat') heartbeats[conn.peer] = Date.now();
             if (data.type === 'profile') {
                 db.chats[conn.peer].name = data.profile.name;
-                db.chats[conn.peer].pic = data.profile.pic;
+                db.chats[conn.peer].pic = data.profile.pic || '';
                 save(); renderSidebar();
                 if(activeId === conn.peer) syncActiveUI();
             }
@@ -197,18 +196,25 @@
                 data.payload.expiresAt = Date.now() + 604800000;
                 db.chats[conn.peer].messages.push(data.payload);
                 save();
-                if (activeId === conn.peer) { renderMsgs(); }
+                if (activeId === conn.peer) renderMsgs();
             }
         });
-        conn.on('close', () => updateStatus(false));
+        conn.on('close', () => {
+            if(activeId === conn.peer) updateStatus(false);
+            renderSidebar();
+        });
     }
 
     function checkHealth() {
         const now = Date.now();
         Object.keys(connections).forEach(id => {
-            if (connections[id].open) {
-                connections[id].send({ type: 'heartbeat' });
-                if (heartbeats[id] && (now - heartbeats[id] > 3000)) updateStatus(false);
+            if (connections[id]?.open) {
+                try {
+                    connections[id].send({ type: 'heartbeat' });
+                } catch(e) {}
+                if (heartbeats[id] && (now - heartbeats[id] > 3000)) {
+                    updateStatus(false);
+                }
             }
         });
     }
@@ -216,7 +222,7 @@
     function sendMsg() {
         const input = document.getElementById('msgInput');
         const val = input.value.trim();
-        if (!val || !activeId) return;
+        if (!val || !activeId || !db.chats[activeId]) return;
         const payload = { text: val, time: Date.now(), expiresAt: Date.now() + 604800000 };
         if (connections[activeId]?.open) connections[activeId].send({ type: 'msg', payload });
         db.chats[activeId].messages.push({ ...payload, sender: 'me' });
@@ -233,8 +239,8 @@
 
         area.innerHTML = db.chats[activeId].messages.map(m => `
             <div class="bubble-wrap ${m.sender}">
-                <div class="bubble">${m.text}</div>
-                <div class="expiry-flame"><i data-lucide="flame" size="10"></i> 1w</div>
+                <div class="bubble">${m.text || ''}</div>
+                <div class="expiry-flame">🔥 1w</div>
             </div>
         `).join('');
         lucide.createIcons();
@@ -242,28 +248,37 @@
     }
 
     function openChat(id) {
+        if (!db.chats[id]) {
+            db.chats[id] = { messages: [], name: 'Unknown', pic: '' };
+            save();
+        }
         activeId = id;
         document.getElementById('rightSidebar').classList.add('active');
         syncActiveUI();
         if (!connections[id] || !connections[id].open) connectToPeer(id);
         renderMsgs();
+        renderSidebar();
         if(window.innerWidth <= 768) toggleSidebar();
     }
 
     function syncActiveUI() {
+        if (!activeId || !db.chats[activeId]) return;
         const chat = db.chats[activeId];
-        document.getElementById('activeNameHeader').innerText = chat.name;
+        document.getElementById('activeNameHeader').innerText = chat.name || 'Unknown';
         const headerPfp = document.getElementById('activePfpHeader');
         headerPfp.style.display = chat.pic ? 'block' : 'none';
-        headerPfp.style.backgroundImage = chat.pic ? `url(${chat.pic})` : 'none';
+        if (chat.pic) headerPfp.style.backgroundImage = `url(${chat.pic})`;
 
         ['side', 'mob'].forEach(p => {
             const nameEl = document.getElementById(p + 'Name');
             const pfpEl = document.getElementById(p + 'Pfp');
             const idEl = document.getElementById(p + 'Id');
-            if(nameEl) nameEl.innerText = chat.name;
+            if(nameEl) nameEl.innerText = chat.name || 'Unknown';
             if(idEl) idEl.innerText = activeId;
-            if(pfpEl) pfpEl.style.backgroundImage = chat.pic ? `url(${chat.pic})` : 'none';
+            if(pfpEl) {
+                pfpEl.style.backgroundImage = chat.pic ? `url(${chat.pic})` : 'none';
+                pfpEl.style.backgroundColor = chat.pic ? 'transparent' : '#111';
+            }
         });
     }
 
@@ -289,24 +304,29 @@
     function saveSettings() {
         db.me.name = document.getElementById('nameInp').value || db.me.name;
         save(); closeModals();
-        Object.values(connections).forEach(c => c.open && c.send({ type: 'profile', profile: db.me }));
+        Object.values(connections).forEach(c => {
+            if (c?.open) c.send({ type: 'profile', profile: db.me });
+        });
+        renderSidebar();
     }
 
     function copyText(txt) {
-        navigator.clipboard.writeText(txt);
+        navigator.clipboard.writeText(txt).catch(() => {});
         const t = document.getElementById('toast');
         t.style.display = 'block';
         setTimeout(() => t.style.display = 'none', 2000);
     }
 
     function handleHeaderClick() {
-        if (window.innerWidth <= 768 && activeId) openModal('mobileProfileModal');
+        if (window.innerWidth <= 768 && activeId) {
+            openModal('mobileProfileModal');
+        }
     }
 
     function updateStatus(online) {
         const dot = document.getElementById('statusDot');
         const txt = document.getElementById('activeStatusText');
-        if (activeId) {
+        if (activeId && dot && txt) {
             dot.style.background = online ? '#00ff88' : '#ff4444';
             txt.innerText = online ? 'connected & encrypted' : 'offline (away)';
         }
@@ -314,8 +334,14 @@
 
     function toggleSidebar() { document.getElementById('sidebar').classList.toggle('closed'); }
     function toggleProfileSidebar() { document.getElementById('rightSidebar').classList.toggle('active'); }
-    function connectToPeer(id) { if (id !== myId) setupConn(peer.connect(id)); }
-    function joinTarget() { const id = document.getElementById('joinIdInput').value.trim(); if (id) { openChat(id); closeModals(); } }
+    function connectToPeer(id) { if (id !== myId && peer) setupConn(peer.connect(id)); }
+    function joinTarget() { 
+        const id = document.getElementById('joinIdInput').value.trim(); 
+        if (id && id !== myId) { 
+            openChat(id); 
+        }
+        closeModals(); 
+    }
     function openModal(id) {
         document.getElementById(id).style.display = 'flex';
         if(id === 'settingsModal') document.getElementById('nameInp').value = db.me.name;
@@ -327,7 +353,9 @@
     function cleanupMessages() {
         const now = Date.now();
         Object.keys(db.chats).forEach(id => {
-            db.chats[id].messages = db.chats[id].messages.filter(m => m.expiresAt > now);
+            if (db.chats[id]) {
+                db.chats[id].messages = db.chats[id].messages.filter(m => m.expiresAt > now);
+            }
         });
         save();
         if (activeId) renderMsgs();
@@ -337,17 +365,18 @@
         const list = document.getElementById('chatList');
         list.innerHTML = Object.keys(db.chats).map(id => `
             <div onclick="openChat('${id}')" style="padding:15px; border-radius:15px; cursor:pointer; display:flex; align-items:center; gap:12px; margin-bottom:8px; background:${activeId===id?'rgba(255,255,255,0.1)':'transparent'}">
-                <div class="avatar-sm" style="background-image:url(${db.chats[id].pic})"></div>
+                <div class="avatar-sm" style="background-image:${db.chats[id]?.pic ? `url(${db.chats[id].pic})` : 'none'}"></div>
                 <div style="flex:1">
-                    <div style="font-weight:600; font-size:0.9rem;">${db.chats[id].name}</div>
+                    <div style="font-weight:600; font-size:0.9rem;">${db.chats[id]?.name || 'Unknown'}</div>
                     <div style="font-size:0.6rem; color:#444">${id.substring(0,12)}...</div>
                 </div>
             </div>
         `).join('');
+        lucide.createIcons();
     }
 
     function uploadImg(input) {
-        if (!input.files[0] || !activeId || !connections[activeId]?.open) return;
+        if (!input.files[0] || !activeId || !db.chats[activeId] || !connections[activeId]?.open) return;
         const r = new FileReader();
         r.onload = e => {
             const payload = { img: e.target.result, time: Date.now(), expiresAt: Date.now() + 604800000 };
