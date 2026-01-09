@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>x_x | Secure Direct</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root {
+            --bg: #000;
+            --border: rgba(255,255,255,0.08);
+            --text: #eee;
+            --accent: #ff4444;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; outline: none; -webkit-tap-highlight-color: transparent; }
+        body { background: var(--bg); color: var(--text); font-family: -apple-system, system-ui, sans-serif; height: 100vh; overflow: hidden; display: flex; }
+
+        .glass { background: rgba(15,15,15,0.4); backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.05); }
+
+        .sidebar { width: 320px; display: flex; flex-direction: column; border-right: 1px solid var(--border); transition: transform 0.3s ease; z-index: 1000; }
+        .sidebar.closed { transform: translateX(-100%); position: absolute; height: 100%; }
+
+        .main { flex: 1; display: flex; flex-direction: column; background: #000; position: relative; height: 100vh; }
+
+        .info-sidebar { width: 300px; display: none; flex-direction: column; align-items: center; padding: 40px 20px; border-left: 1px solid var(--border); background: rgba(5,5,5,0.5); backdrop-filter: blur(20px); }
+        .info-sidebar.active { display: flex; }
+
+        .id-badge {
+            font-size: 10px; color: #444; text-align: center; cursor: pointer;
+            margin-top: 10px; filter: blur(4px); transition: filter 0.2s;
+        }
+        .id-badge:hover { filter: blur(0); color: #888; }
+
+        .chat-top { padding: 15px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; min-height: 75px; background: rgba(10,10,10,0.5); backdrop-filter: blur(20px); }
+
+        .msg-area { flex: 1; overflow-y: auto; padding: 25px; display: none; flex-direction: column; gap: 10px; }
+
+        .input-box { padding: 20px; display: none; gap: 12px; align-items: center; border-top: 1px solid var(--border); background: rgba(10,10,10,0.5); flex-shrink: 0; }
+        .input-wrap { flex: 1; background: rgba(12,12,12,0.6); border: 1px solid var(--border); border-radius: 15px; display: flex; align-items: center; padding: 0 15px; }
+        input[type="text"] { flex: 1; background: none; border: none; color: #fff; padding: 15px 0; font-size: 1rem; }
+
+        .bubble-wrap { display: flex; flex-direction: column; max-width: 80%; }
+        .me { align-self: flex-end; }
+        .them { align-self: flex-start; }
+        .bubble { padding: 12px 16px; border-radius: 18px; font-size: 0.95rem; background: rgba(30,79,160,0.7); color: white; border-bottom-right-radius: 4px; }
+        .them .bubble { background: rgba(24,24,24,0.6); border: 1px solid var(--border); border-bottom-right-radius: 18px; border-bottom-left-radius: 4px; }
+
+        .expiry-flame { font-size: 10px; color: var(--accent); margin-top: 4px; display: flex; align-items: center; gap: 3px; }
+
+        .avatar-main { width: 100px; height: 100px; border-radius: 50%; background-size: cover; background-position: center; border: 2px solid var(--border); margin-bottom: 15px; }
+        .avatar-sm { width: 40px; height: 40px; border-radius: 50%; background-size: cover; background-position: center; background-color: #111; border: 1px solid var(--border); }
+
+        #toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #fff; color: #000; padding: 10px 20px; border-radius: 20px; font-weight: bold; font-size: 12px; display: none; z-index: 9999; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+
+        .btn { background: #fff; color: #000; padding: 14px; border-radius: 12px; font-weight: 700; border: none; cursor: pointer; width: 100%; }
+        .icon-btn { background: none; border: none; color: #666; cursor: pointer; display: flex; align-items: center; }
+
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 2000; }
+
+        @media (max-width: 768px) {
+            .info-sidebar { display: none !important; }
+            .sidebar { width: 85vw; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="toast">Copied to clipboard</div>
+
+<div class="sidebar glass" id="sidebar">
+    <div style="padding: 30px 20px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="font-size: 2rem; font-weight: 900; letter-spacing: -4px;">x_x</div>
+        <button class="icon-btn" onclick="openModal('settingsModal')"><i data-lucide="user-cog"></i></button>
+    </div>
+    <div style="padding: 0 20px 20px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--border);">
+        <button class="btn" onclick="openModal('joinModal')">Connect by Peer ID</button>
+        <div id="myIdStatus" class="id-badge" onclick="copyText(this.innerText)">Fetching...</div>
+    </div>
+    <div id="chatList" style="flex: 1; overflow-y: auto; padding: 15px;"></div>
+</div>
+
+<div class="main">
+    <div class="chat-top glass">
+        <div style="display: flex; align-items: center; gap: 15px; cursor: pointer;" onclick="handleHeaderClick()">
+            <button class="icon-btn" onclick="event.stopPropagation(); toggleSidebar()"><i data-lucide="menu"></i></button>
+            <div id="activePfpHeader" class="avatar-sm" style="display:none"></div>
+            <div>
+                <h4 id="activeNameHeader">Secure Direct</h4>
+                <div style="display:flex; align-items:center; gap:5px;">
+                    <div id="statusDot" style="width:8px; height:8px; border-radius:50%; background:#222;"></div>
+                    <span id="activeStatusText" style="font-size: 11px; color: #555;">Ready</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="welcome" style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; opacity:0.3;">
+        <i data-lucide="shield-check" size="80"></i>
+        <p style="margin-top:20px; letter-spacing: 4px; font-weight:bold;">SECURE DIRECT</p>
+    </div>
+
+    <div id="msgArea" class="msg-area"></div>
+
+    <div class="input-box glass" id="inputContainer">
+        <div class="input-wrap">
+            <input type="text" id="msgInput" placeholder="Write securely...">
+            <button class="icon-btn" onclick="document.getElementById('imgInp').click()"><i data-lucide="image"></i></button>
+            <input type="file" id="imgInp" hidden accept="image/*" onchange="uploadImg(this)">
+        </div>
+        <button class="icon-btn" onclick="sendMsg()" style="color: #fff;"><i data-lucide="arrow-up-circle" size="32"></i></button>
+    </div>
+</div>
+
+<div class="info-sidebar glass" id="rightSidebar">
+    <div class="avatar-main" id="sidePfp"></div>
+    <h2 id="sideName" style="margin-bottom: 5px;">User</h2>
+    <code id="sideId" class="id-badge" style="filter:none; opacity:0.5; margin-bottom:20px;" onclick="copyText(this.innerText)"></code>
+    <button class="btn" style="background:transparent; border:1px solid var(--border); color:#888;" onclick="toggleProfileSidebar()">Close Panel</button>
+</div>
+
+<div class="modal-overlay" id="joinModal">
+    <div class="glass" style="padding: 30px; border-radius: 24px; width: 90%; max-width: 400px;">
+        <h2>Connect Peer</h2>
+        <input type="text" id="joinIdInput" placeholder="Paste ID" style="width:100%; padding:15px; background:#000; border:1px solid var(--border); color:#fff; margin: 20px 0; border-radius:12px;">
+        <button class="btn" onclick="joinTarget()">Connect</button>
+        <button class="btn" style="background:none; color:#555;" onclick="closeModals()">Cancel</button>
+    </div>
+</div>
+
+<div class="modal-overlay" id="settingsModal">
+    <div class="glass" style="padding: 30px; border-radius: 24px; width: 90%; max-width: 400px; text-align:center;">
+        <div class="avatar-main" id="mySettingsPfp" style="margin: 0 auto 20px; cursor:pointer;" onclick="document.getElementById('pfpInp').click()"></div>
+        <input type="file" id="pfpInp" hidden accept="image/*" onchange="setNewPfp(this)">
+        <input type="text" id="nameInp" placeholder="Your Name" style="width:100%; padding:15px; background:#000; border:1px solid var(--border); color:#fff; margin-bottom: 20px; border-radius:12px;">
+        <button class="btn" onclick="saveSettings()">Save Identity</button>
+        <button class="btn" style="background:none; color:#555;" onclick="closeModals()">Cancel</button>
+    </div>
+</div>
+
+<div class="modal-overlay" id="mobileProfileModal" onclick="closeModals()">
+    <div class="glass" style="padding: 40px 20px; border-radius: 30px 30px 0 0; position: fixed; bottom: 0; width: 100%; text-align: center;" onclick="event.stopPropagation()">
+        <div class="avatar-main" id="mobPfp" style="margin: 0 auto 15px;"></div>
+        <h2 id="mobName"></h2>
+        <p id="mobId" class="id-badge" style="filter:none; opacity:0.5;" onclick="copyText(this.innerText)"></p>
+        <button class="btn" style="margin-top: 20px; background: #111; color: #fff;" onclick="closeModals()">Dismiss</button>
+    </div>
+</div>
+
+<script>
+    lucide.createIcons();
+    let peer, myId, activeId;
+    let connections = {};
+    let heartbeats = {};
+
+    let db = JSON.parse(localStorage.getItem('x_x_v2')) || {
+        chats: {},
+        me: { name: 'Node_' + Math.floor(Math.random()*999), pic: '' }
+    };
+
+    function init() {
+        peer = new Peer(null);
+        peer.on('open', id => {
+            myId = id;
+            document.getElementById('myIdStatus').innerText = id;
+            Object.keys(db.chats).forEach(cid => connectToPeer(cid));
+            renderSidebar();
+        });
+
+        peer.on('connection', conn => setupConn(conn));
+        setInterval(checkHealth, 1000);
+        setInterval(cleanupMessages, 60000);
+
+        updatePfpPreview('mySettingsPfp', db.me.pic);
+    }
+
+    function setupConn(conn) {
+        connections[conn.peer] = conn;
+        if (!db.chats[conn.peer]) db.chats[conn.peer] = { messages: [], name: 'Unknown', pic: '' };
+
+        conn.on('open', () => {
+            conn.send({ type: 'profile', profile: db.me });
+            if(activeId === conn.peer) updateStatus(true);
+            renderSidebar();
+        });
+
+        conn.on('data', data => {
+            if (data.type === 'heartbeat') heartbeats[conn.peer] = Date.now();
+            if (data.type === 'profile') {
+                db.chats[conn.peer].name = data.profile.name;
+                db.chats[conn.peer].pic = data.profile.pic;
+                save(); renderSidebar();
+                if(activeId === conn.peer) syncActiveUI();
+            }
+            if (data.type === 'msg') {
+                data.payload.sender = 'them';
+                data.payload.expiresAt = Date.now() + 604800000;
+                db.chats[conn.peer].messages.push(data.payload);
+                save();
+                if (activeId === conn.peer) { renderMsgs(); }
+            }
+        });
+        conn.on('close', () => updateStatus(false));
+    }
+
+    function checkHealth() {
+        const now = Date.now();
+        Object.keys(connections).forEach(id => {
+            if (connections[id].open) {
+                connections[id].send({ type: 'heartbeat' });
+                if (heartbeats[id] && (now - heartbeats[id] > 3000)) updateStatus(false);
+            }
+        });
+    }
+
+    function sendMsg() {
+        const input = document.getElementById('msgInput');
+        const val = input.value.trim();
+        if (!val || !activeId) return;
+        const payload = { text: val, time: Date.now(), expiresAt: Date.now() + 604800000 };
+        if (connections[activeId]?.open) connections[activeId].send({ type: 'msg', payload });
+        db.chats[activeId].messages.push({ ...payload, sender: 'me' });
+        save(); renderMsgs();
+        input.value = '';
+    }
+
+    function renderMsgs() {
+        const area = document.getElementById('msgArea');
+        if (!activeId || !db.chats[activeId]) return;
+        area.style.display = 'flex';
+        document.getElementById('welcome').style.display = 'none';
+        document.getElementById('inputContainer').style.display = 'flex';
+
+        area.innerHTML = db.chats[activeId].messages.map(m => `
+            <div class="bubble-wrap ${m.sender}">
+                <div class="bubble">${m.text}</div>
+                <div class="expiry-flame"><i data-lucide="flame" size="10"></i> 1w</div>
+            </div>
+        `).join('');
+        lucide.createIcons();
+        area.scrollTop = area.scrollHeight;
+    }
+
+    function openChat(id) {
+        activeId = id;
+        document.getElementById('rightSidebar').classList.add('active');
+        syncActiveUI();
+        if (!connections[id] || !connections[id].open) connectToPeer(id);
+        renderMsgs();
+        if(window.innerWidth <= 768) toggleSidebar();
+    }
+
+    function syncActiveUI() {
+        const chat = db.chats[activeId];
+        document.getElementById('activeNameHeader').innerText = chat.name;
+        const headerPfp = document.getElementById('activePfpHeader');
+        headerPfp.style.display = chat.pic ? 'block' : 'none';
+        headerPfp.style.backgroundImage = chat.pic ? `url(${chat.pic})` : 'none';
+
+        ['side', 'mob'].forEach(p => {
+            const nameEl = document.getElementById(p + 'Name');
+            const pfpEl = document.getElementById(p + 'Pfp');
+            const idEl = document.getElementById(p + 'Id');
+            if(nameEl) nameEl.innerText = chat.name;
+            if(idEl) idEl.innerText = activeId;
+            if(pfpEl) pfpEl.style.backgroundImage = chat.pic ? `url(${chat.pic})` : 'none';
+        });
+    }
+
+    function updatePfpPreview(elId, pic) {
+        const el = document.getElementById(elId);
+        if(!el) return;
+        el.style.backgroundImage = pic ? `url(${pic})` : 'none';
+        el.style.backgroundColor = pic ? 'transparent' : '#111';
+    }
+
+    function setNewPfp(input) {
+        if (input.files[0]) {
+            const r = new FileReader();
+            r.onload = e => {
+                const b64 = e.target.result;
+                db.me.pic = b64;
+                updatePfpPreview('mySettingsPfp', b64);
+            };
+            r.readAsDataURL(input.files[0]);
+        }
+    }
+
+    function saveSettings() {
+        db.me.name = document.getElementById('nameInp').value || db.me.name;
+        save(); closeModals();
+        Object.values(connections).forEach(c => c.open && c.send({ type: 'profile', profile: db.me }));
+    }
+
+    function copyText(txt) {
+        navigator.clipboard.writeText(txt);
+        const t = document.getElementById('toast');
+        t.style.display = 'block';
+        setTimeout(() => t.style.display = 'none', 2000);
+    }
+
+    function handleHeaderClick() {
+        if (window.innerWidth <= 768 && activeId) openModal('mobileProfileModal');
+    }
+
+    function updateStatus(online) {
+        const dot = document.getElementById('statusDot');
+        const txt = document.getElementById('activeStatusText');
+        if (activeId) {
+            dot.style.background = online ? '#00ff88' : '#ff4444';
+            txt.innerText = online ? 'connected & encrypted' : 'offline (away)';
+        }
+    }
+
+    function toggleSidebar() { document.getElementById('sidebar').classList.toggle('closed'); }
+    function toggleProfileSidebar() { document.getElementById('rightSidebar').classList.toggle('active'); }
+    function connectToPeer(id) { if (id !== myId) setupConn(peer.connect(id)); }
+    function joinTarget() { const id = document.getElementById('joinIdInput').value.trim(); if (id) { openChat(id); closeModals(); } }
+    function openModal(id) {
+        document.getElementById(id).style.display = 'flex';
+        if(id === 'settingsModal') document.getElementById('nameInp').value = db.me.name;
+        if(id === 'mobileProfileModal' && activeId) syncActiveUI();
+    }
+    function closeModals() { document.querySelectorAll('.modal-overlay').forEach(m => m.style.display = 'none'); }
+    function save() { localStorage.setItem('x_x_v2', JSON.stringify(db)); }
+
+    function cleanupMessages() {
+        const now = Date.now();
+        Object.keys(db.chats).forEach(id => {
+            db.chats[id].messages = db.chats[id].messages.filter(m => m.expiresAt > now);
+        });
+        save();
+        if (activeId) renderMsgs();
+    }
+
+    function renderSidebar() {
+        const list = document.getElementById('chatList');
+        list.innerHTML = Object.keys(db.chats).map(id => `
+            <div onclick="openChat('${id}')" style="padding:15px; border-radius:15px; cursor:pointer; display:flex; align-items:center; gap:12px; margin-bottom:8px; background:${activeId===id?'rgba(255,255,255,0.1)':'transparent'}">
+                <div class="avatar-sm" style="background-image:url(${db.chats[id].pic})"></div>
+                <div style="flex:1">
+                    <div style="font-weight:600; font-size:0.9rem;">${db.chats[id].name}</div>
+                    <div style="font-size:0.6rem; color:#444">${id.substring(0,12)}...</div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function uploadImg(input) {
+        if (!input.files[0] || !activeId || !connections[activeId]?.open) return;
+        const r = new FileReader();
+        r.onload = e => {
+            const payload = { img: e.target.result, time: Date.now(), expiresAt: Date.now() + 604800000 };
+            connections[activeId].send({ type: 'msg', payload });
+            db.chats[activeId].messages.push({ ...payload, sender: 'me' });
+            save();
+            renderMsgs();
+        };
+        r.readAsDataURL(input.files[0]);
+    }
+
+    init();
+</script>
+</body>
+</html>
